@@ -9,7 +9,17 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from cachetools import TTLCache
 import hashlib
+import logging
+import sys
 from transcript_service import TranscriptService
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__, static_folder='static')
@@ -74,15 +84,20 @@ def get_transcript():
         languages = data.get('languages', None)
         include_timestamps = data.get('include_timestamps', True)
         
+        logger.info(f"Nova requisição - URL: {url[:50]}... Idiomas: {languages}")
+        
         # Extract video ID
         video_id = transcript_service.extract_video_id(url)
         
         if not video_id:
+            logger.warning(f"Falha ao extrair video_id da URL: {url}")
             return jsonify({
                 'success': False,
                 'error': 'URL inválida',
                 'message': 'Não foi possível extrair o ID do vídeo. Verifique se a URL está correta.'
             }), 400
+        
+        logger.info(f"Video ID extraído: {video_id}")
         
         # Create cache key
         cache_key = hashlib.md5(
@@ -91,16 +106,20 @@ def get_transcript():
         
         # Check cache first
         if cache_key in transcript_cache:
+            logger.info(f"Retornando do cache para video_id: {video_id}")
             cached_result = transcript_cache[cache_key]
             cached_result['cached'] = True
             return jsonify(cached_result), 200
         
         # Fetch transcript
         try:
+            logger.info(f"Buscando transcrição para video_id: {video_id}")
             transcript_list, language = transcript_service.get_transcript(
                 video_id, 
                 languages=languages
             )
+            
+            logger.info(f"Transcrição obtida com sucesso! Idioma: {language}, Segmentos: {len(transcript_list)}")
             
             # Format transcript
             formatted_transcript = transcript_service.format_transcript(
@@ -124,6 +143,7 @@ def get_transcript():
             return jsonify(result), 200
             
         except Exception as e:
+            logger.error(f"ERRO ao buscar transcrição - Video: {video_id}, Tipo: {type(e).__name__}, Mensagem: {str(e)}")
             error_info = transcript_service.get_error_message(e)
             return jsonify({
                 'success': False,
@@ -131,6 +151,7 @@ def get_transcript():
             }), 400
     
     except Exception as e:
+        logger.error(f"ERRO CRÍTICO na requisição: {type(e).__name__} - {str(e)}")
         return jsonify({
             'success': False,
             'error': 'Erro interno',
